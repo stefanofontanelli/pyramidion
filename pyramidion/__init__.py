@@ -99,10 +99,53 @@ class DeformBase(crudalchemy.Base):
                                       'search']}
 
     def create(self, context, request):
-        return {}
+
+        form = Form(self.create_schema,
+                    action=request.route_url(self.routes['create']),
+                    buttons=(Button(name='submit',
+                                    title='Save',
+                                    type='submit',
+                                    value='submit'),),
+                    bootstrap_form_style='form-horizontal')
+
+        if 'submit' in request.POST:
+
+            controls = request.POST.items()
+
+            try:
+                values = form.validate(controls)
+                session = self.session or getattr(request, self.db_session_key)
+                obj = super(DeformBase, self).create(session=session, **values)
+                session.commit()
+                params = {name : getattr(obj, name)
+                          for name in self.mapping_registry.pkeys}
+                location = request.route_url(self.routes['read'], **params)
+                return HTTPTemporaryRedirect(location=location)
+
+            except ValidationFailure, e:
+                form = None
+                values = colander.null
+                error = e
+
+        else:
+            values = colander.null
+            error = None
+
+        return {'form': form, 'error': error, 'values': values}
 
     def read(self, context, request):
-        pass
+        form = Form(self.read_schema,
+                    action=request.route_url(self.routes['update'],
+                                             **request.matchdict),
+                    buttons=(Button(name='edit',
+                                    title='Edit',
+                                    type='submit',
+                                    value='edit'),),
+                    bootstrap_form_style='form-horizontal')
+        session = self.session or getattr(request, self.db_session_key)
+        obj = super(DeformBase, self).read(session=session, **request.matchdict)
+        values = self.read_schema.dictify(obj)
+        return {'form': form, 'values': values}
 
     def update(self, context, request):
         pass
@@ -120,28 +163,72 @@ class DeformBase(crudalchemy.Base):
                                     value='submit'),),
                     bootstrap_form_style='form-inline')
 
-        if 'submit' in request.POST:  # detect that the submit button was clicked
+        if 'start' in request.GET:
+            start = request.GET['start']
 
-            controls = request.POST.items()  # get the form controls
+        else:
+            start = 0
+
+        if 'limit' in request.GET:
+            limit = request.GET['limit']
+
+        else:
+            limit = 25
+
+        if 'submit' in request.POST:
+
+            controls = request.POST.items()
 
             try:
-                appstruct = form.validate(controls)  # call validate
-            except ValidationFailure, e:  # catch the exception
-                return {'form': e.render()}  # re-render the form with an exception
+                values = form.validate(controls)
+                error = None
 
-            # the form submission succeeded, we have the data
-            return {'form': form, 'values': appstruct}
+            except ValidationFailure, e:
+                form = None
+                values = colander.null
+                error = e
 
-        return {'form': form, 'values': colander.null}
+        else:
+            values = colander.null
+            error = None
+
+        session = self.session or getattr(request, self.db_session_key)
+
+        if values is colander.null:
+            criterions = None
+        else:
+            criterions = [getattr(self.cls, attr) == values[attr]
+                          for attr in values
+                          if not values[attr] is colander.null]
+
+        order_by = None
+
+        items = super(DeformBase, self).search(session=session,
+                                               criterions=criterions,
+                                               order_by=order_by,
+                                               start=start,
+                                               limit=limit)
+
+        return {'form': form,
+                'values': values,
+                'items': items,
+                'error': error,
+                'routes': self.routes}
 
     def setup_routing(self, config, prefix=''):
 
         for action in self.routes:
 
             resource = self.cls.__name__.lower()
+            path = '{}/{}/{}'.format(prefix, resource, action)
+            if action in set(['read', 'update', 'delete']):
+                pkeys = '/'.join(['{%s}' % name
+                                  for name in self.mapping_registry.pkeys])
+                path = '{}/{}'.format(path, pkeys)
+
+            config.add_route(self.routes[action], path)
+
             tpl = '/{}/{}.mako'.format(resource, action)
-            config.add_route(self.routes[action],
-                             '{}/{}/{}'.format(prefix, resource, action))
             config.add_view(getattr(self, action),
                             route_name=self.routes[action],
                             renderer=tpl)

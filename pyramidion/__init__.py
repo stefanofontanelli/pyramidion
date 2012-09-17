@@ -9,6 +9,7 @@ from deform import Button
 from deform import Form
 from deform import ValidationFailure
 from pyramid.httpexceptions import HTTPTemporaryRedirect
+from pyramid.httpexceptions import HTTPFound
 from sqlalchemy import engine_from_config
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import scoped_session
@@ -122,7 +123,7 @@ class DeformBase(crudalchemy.Base):
                 params = {name : getattr(obj, name)
                           for name in self.mapping_registry.pkeys}
                 location = request.route_url(self.routes['read'], **params)
-                return HTTPTemporaryRedirect(location=location)
+                return HTTPFound(location=location)
 
             except ValidationFailure, e:
                 form = None

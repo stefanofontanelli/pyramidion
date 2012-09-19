@@ -199,7 +199,7 @@ class DeformBase(crudalchemy.Base):
 
         form = Form(self.search_schema,
                     action=request.route_url(self.routes['search']),
-                    method='GET',
+                    method='POST',
                     buttons=(Button(name='submit',
                                     title='Search',
                                     type='submit',
@@ -261,7 +261,9 @@ class DeformBase(crudalchemy.Base):
             'total': total_pages,
             'current': current_page,
             'prev': None if current_page <= 1 else current_page - 1,
-            'next': None if current_page >= total_pages else current_page + 1
+            'next': None if current_page >= total_pages else current_page + 1,
+            'start': start,
+            'limit': limit
         }
 
         return {

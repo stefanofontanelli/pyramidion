@@ -254,7 +254,7 @@ class DeformBase(crudalchemy.Base):
         else:
             criterions = [getattr(self.cls, attr) == values[attr]
                           for attr in values
-                          if not values[attr] is colander.null]
+                          if values[attr]]
 
         order_by = None
 

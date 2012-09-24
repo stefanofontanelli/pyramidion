@@ -1,6 +1,6 @@
 
 from deform_bootstrap.widget import ChosenSingleWidget
-from sqlalchemy.orm.mapper import class_mapper
+from pyramid.path import DottedNameResolver
 
 
 class SQLAChosenSingleWidget(ChosenSingleWidget):
@@ -12,7 +12,7 @@ class SQLAChosenSingleWidget(ChosenSingleWidget):
         ChosenSingleWidget.__init__(self, **kw)
 
     def populate(self, session, *filters):
-        class_ = class_mapper(self.class_, compile=False)
+        class_ = DottedNameResolver().resolve(self.class_)
         query = session.query(getattr(class_, self.value),
                               getattr(class_, self.label))
         self.values = [t for t in query.filter(*filters).all()]

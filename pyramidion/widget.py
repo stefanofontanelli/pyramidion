@@ -15,4 +15,4 @@ class SQLAChosenSingleWidget(ChosenSingleWidget):
         class_ = DottedNameResolver().resolve(self.class_)
         query = session.query(getattr(class_, self.value),
                               getattr(class_, self.label))
-        self.values = [t for t in query.filter(*filters).all()]
+        self.values = [('', '')] + [t for t in query.filter(*filters).all()]

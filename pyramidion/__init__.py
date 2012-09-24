@@ -4,6 +4,7 @@
 #
 # This module is part of Pyramidion and is released under
 # the MIT License: http://www.opensource.org/licenses/mit-license.php
+from .widget import SQLAChosenSingleWidget
 from colanderalchemy import SQLAlchemyMapping
 from deform import Button
 from deform import Form
@@ -118,7 +119,9 @@ class DeformBase(crudalchemy.Base):
             try:
                 values = form.validate(controls)
                 session = self.session or getattr(request, self.db_session_key)
-                obj = super(DeformBase, self).create(session=session, **values)
+                obj = super(DeformBase, self).create(session=session,
+                                                     validate=False,
+                                                     **values)
                 session.commit()
                 params = {name : getattr(obj, name)
                           for name in self.mapping_registry.pkeys}
@@ -170,7 +173,9 @@ class DeformBase(crudalchemy.Base):
             try:
                 values = form.validate(controls)
                 session = self.session or getattr(request, self.db_session_key)
-                obj = super(DeformBase, self).update(session=session, **values)
+                obj = super(DeformBase, self).update(session=session,
+                                                     validate=False,
+                                                     **values)
                 session.commit()
                 location = request.route_url(self.routes['read'], **params)
                 return HTTPFound(location=location)
@@ -196,6 +201,15 @@ class DeformBase(crudalchemy.Base):
         return HTTPFound(location=location)
 
     def search(self, context, request):
+
+        session = self.session or getattr(request, self.db_session_key)
+
+        for node in self.search_schema:
+            try:
+                node.widget.populate(session)
+
+            except AttributeError:
+                continue
 
         form = Form(self.search_schema,
                     action=request.route_url(self.routes['search']),
@@ -234,8 +248,6 @@ class DeformBase(crudalchemy.Base):
         else:
             values = colander.null
             error = None
-
-        session = self.session or getattr(request, self.db_session_key)
 
         if values is colander.null:
             criterions = None
@@ -291,7 +303,8 @@ class DeformBase(crudalchemy.Base):
             tpl = '/{}/{}.mako'.format(resource, action)
             config.add_view(getattr(self, action),
                             route_name=self.routes[action],
-                            renderer=tpl)
+                            renderer=tpl,
+                            permission=action)
 
 
 class EmberDataBase(crudalchemy.Base):

@@ -166,13 +166,14 @@ class DeformBase(crudalchemy.Base):
                                     value='submit'),),
                     bootstrap_form_style='form-horizontal')
 
+        session = self.session or getattr(request, self.db_session_key)
+
         if 'submit' in request.POST:
 
             controls = request.POST.items()
 
             try:
                 values = form.validate(controls)
-                session = self.session or getattr(request, self.db_session_key)
                 obj = super(DeformBase, self).update(session=session,
                                                      validate=False,
                                                      **values)
@@ -186,7 +187,9 @@ class DeformBase(crudalchemy.Base):
                 error = e
 
         else:
-            values = self.read(context, request)['values']
+            obj = super(DeformBase, self).read(session=session, **params)
+            values = self.update_schema.dictify(obj)
+            print obj, values
             error = None
 
         return {'form': form, 'error': error, 'values': values}

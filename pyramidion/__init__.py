@@ -79,7 +79,8 @@ class DeformBase(crudalchemy.Base):
     def __init__(self, cls, session=None,
                  db_session_key='db_session',
                  create_schema=None, read_schema=None,
-                 update_schema=None, delete_schema=None, search_schema=None):
+                 update_schema=None, delete_schema=None,
+                 search_schema=None, export_schema=None):
 
         super(DeformBase, self).__init__(cls, session,
                                          create_schema=create_schema,
@@ -93,6 +94,18 @@ class DeformBase(crudalchemy.Base):
                 node.missing = colander.null
 
         self.search_schema = search_schema
+
+        if export_schema is None:
+            excludes = {}
+            for name in self.mapping_registry.attrs:
+                if name in self.mapping_registry.relationships:
+                    excludes[name] = True
+                else:
+                    excludes[name] = False
+            export_schema = SQLAlchemyMapping(cls, excludes=excludes)
+
+        self.export_schema = export_schema
+
         self.db_session_key = db_session_key
         self.routes = {action: '{}_{}'.format(self.cls.__name__.lower(),
                                               action)
@@ -328,6 +341,14 @@ class DeformBase(crudalchemy.Base):
             criterions.append(criterion)
 
         return criterions
+
+    def export(self, context, request):
+        session = self.session or getattr(request, self.db_session_key)
+        criterions = self.get_search_criterions(request.params)
+        items = crudalchemy.Base.search(self,
+                                        session=session,
+                                        criterions=criterions)
+        return {'items': items}
 
     def setup_routing(self, config, prefix=''):
 

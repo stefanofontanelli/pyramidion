@@ -255,9 +255,7 @@ class DeformBase(crudalchemy.Base):
         if values is colander.null:
             criterions = None
         else:
-            criterions = [getattr(self.cls, attr) == values[attr]
-                          for attr in values
-                          if values[attr]]
+            criterions = self.get_search_criterions(values)
 
         order_by = None
 
@@ -289,6 +287,30 @@ class DeformBase(crudalchemy.Base):
             'routes': self.routes,
             'paginator': paginator
         }
+
+    def get_search_criterions(self, values):
+
+        criterions = []
+        for attr in values:
+            value = values[attr]
+            if not value:
+                continue
+
+            if isinstance(self.search_schema[attr].typ, colander.DateTime):
+                start = datetime(value.year, value.month, value.day, 0, 0, 0)
+                end = datetime(value.year, value.month, value.day,
+                               59, 59, 59, 999999)
+                criterion = getattr(self.cls, attr).between(start, end)
+
+            elif isinstance(self.search_schema[attr].typ, colander.String):
+                criterion = getattr(self.cls, attr).ilike(value)
+
+            else:
+                criterion = getattr(self.cls, attr) == value
+
+            criterions.append(criterion)
+
+        return criterions
 
     def setup_routing(self, config, prefix=''):
 

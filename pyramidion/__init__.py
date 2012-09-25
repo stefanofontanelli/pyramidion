@@ -126,10 +126,10 @@ class DeformBase(crudalchemy.Base):
                 params = {name : getattr(obj, name)
                           for name in self.mapping_registry.pkeys}
                 location = request.route_url(self.routes['read'], **params)
-                return HTTPFound(location=location)
+                raise HTTPFound(location=location)
 
             except ValidationFailure, e:
-                form = None
+                form = form
                 values = colander.null
                 error = e
 
@@ -179,7 +179,7 @@ class DeformBase(crudalchemy.Base):
                                                      **values)
                 session.commit()
                 location = request.route_url(self.routes['read'], **params)
-                return HTTPFound(location=location)
+                raise HTTPFound(location=location)
 
             except ValidationFailure, e:
                 form = None
@@ -189,19 +189,36 @@ class DeformBase(crudalchemy.Base):
         else:
             obj = super(DeformBase, self).read(session=session, **params)
             values = self.update_schema.dictify(obj)
-            print obj, values
             error = None
 
         return {'form': form, 'error': error, 'values': values}
 
     def delete(self, context, request):
+
         params = {name : request.matchdict[name]
                   for name in self.mapping_registry.pkeys}
+        form = Form(self.read_schema,
+                    action=request.route_url(self.routes['delete'], **params),
+                    buttons=(Button(name='submit',
+                                    title='Save',
+                                    type='submit',
+                                    value='submit'),),
+                    bootstrap_form_style='form-horizontal')
+
         session = self.session or getattr(request, self.db_session_key)
-        super(DeformBase, self).delete(session=session, **params)
-        session.commit()
-        location = request.route_url(self.routes['search'])
-        return HTTPFound(location=location)
+
+        if 'submit' in request.POST:
+            super(DeformBase, self).delete(session=session, **params)
+            session.commit()
+            location = request.route_url(self.routes['search'])
+            raise HTTPFound(location=location)
+
+        else:
+            obj = super(DeformBase, self).read(session=session, **params)
+            values = self.read_schema.dictify(obj)
+            error = None
+
+        return {'form': form, 'error': error, 'values': values}
 
     def search(self, context, request):
 

@@ -5,6 +5,7 @@
 # This module is part of Pyramidion and is released under
 # the MIT License: http://www.opensource.org/licenses/mit-license.php
 from .widget import SQLAChosenSingleWidget
+from .widget import Paginator
 from colanderalchemy import SQLAlchemyMapping
 from deform import Button
 from deform import Form
@@ -254,13 +255,13 @@ class DeformBase(crudalchemy.Base):
                     bootstrap_form_style='form-inline')
 
         if 'start' in request.GET:
-            start = request.GET['start']
+            start = int(request.GET['start'])
 
         else:
             start = 0
 
         if 'limit' in request.GET:
-            limit = request.GET['limit']
+            limit = int(request.GET['limit'])
 
         else:
             limit = 25
@@ -297,18 +298,7 @@ class DeformBase(crudalchemy.Base):
                                                order_by=order_by,
                                                start=start,
                                                limit=limit)
-
-        total_pages = int(math.ceil(float(total) / limit))
-        current_page = int(math.ceil(float(start) / limit))
-        paginator = {
-            'total': total_pages,
-            'current': current_page,
-            'prev': None if current_page <= 1 else current_page - 1,
-            'next': None if current_page >= total_pages else current_page + 1,
-            'start': start,
-            'limit': limit
-        }
-
+        paginator = Paginator(total=total, start=start, limit=limit)
         return {
             'form': form,
             'values': values,

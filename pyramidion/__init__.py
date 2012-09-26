@@ -322,6 +322,10 @@ class DeformBase(crudalchemy.Base):
 
         criterions = []
         for attr in values:
+
+            if attr not in self.search_schema:
+                continue
+
             value = values[attr]
             if not value:
                 continue

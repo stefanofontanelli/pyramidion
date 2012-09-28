@@ -116,7 +116,10 @@ class DeformBase(crudalchemy.Base):
                                       'delete',
                                       'search']}
 
-    def create(self, context, request):
+    def create(self, context, request,
+               success_message=None, success_queue='',
+               error_message=None, error_queue='',
+               error_exception_tb=False):
 
         form = Form(self.create_schema,
                     action=request.route_url(self.routes['create']),
@@ -137,15 +140,27 @@ class DeformBase(crudalchemy.Base):
                                                      validate=False,
                                                      **values)
                 session.commit()
-                params = {name : getattr(obj, name)
-                          for name in self.mapping_registry.pkeys}
-                location = request.route_url(self.routes['read'], **params)
-                raise HTTPFound(location=location)
 
-            except ValidationFailure, e:
-                form = form
+            except ValidationFailure as e:
+                session.rollback()
                 values = colander.null
                 error = e
+
+            except Exception as e:
+                log.exception('Error during create')
+                session.rollback()
+                error = None
+                if error_message:
+                    m = error_message if not error_exception_tb \
+                                      else "{}: {}".format(error_message, e)
+                    request.session.flash(m, error_queue)
+
+            else:
+                if success_message:
+                    request.session.flash(success_message, success_queue)
+
+                location = request.route_url(self.routes['search'])
+                raise HTTPFound(location=location)
 
         else:
             values = colander.null
@@ -167,7 +182,10 @@ class DeformBase(crudalchemy.Base):
         values = self.read_schema.dictify(obj)
         return {'form': form, 'values': values}
 
-    def update(self, context, request):
+    def update(self, context, request,
+               success_message=None, success_queue='',
+               error_message=None, error_queue='',
+               error_exception_tb=False):
 
         params = {name : request.matchdict[name]
                   for name in self.mapping_registry.pkeys}
@@ -192,13 +210,27 @@ class DeformBase(crudalchemy.Base):
                                                      validate=False,
                                                      **values)
                 session.commit()
-                location = request.route_url(self.routes['read'], **params)
-                raise HTTPFound(location=location)
 
             except ValidationFailure, e:
-                form = None
+                session.rollback()
                 values = colander.null
                 error = e
+
+            except Exception as e:
+                log.exception('Error during updating')
+                session.rollback()
+                error = None
+                if error_message:
+                    m = error_message if not error_exception_tb \
+                                      else "{}: {}".format(error_message, e)
+                    request.session.flash(m, error_queue)
+
+            else:
+                location = request.route_url(self.routes['search'])
+                if success_message:
+                    request.session.flash(success_message, success_queue)
+
+                raise HTTPFound(location=location)
 
         else:
             obj = super(DeformBase, self).read(session=session, **params)
@@ -207,7 +239,10 @@ class DeformBase(crudalchemy.Base):
 
         return {'form': form, 'error': error, 'values': values}
 
-    def delete(self, context, request):
+    def delete(self, context, request,
+               success_message=None, error_message=None,
+               success_queue='', error_queue='',
+               error_exception_tb=False):
 
         params = {name : request.matchdict[name]
                   for name in self.mapping_registry.pkeys}
@@ -222,10 +257,25 @@ class DeformBase(crudalchemy.Base):
         session = self.session or getattr(request, self.db_session_key)
 
         if 'submit' in request.POST:
-            super(DeformBase, self).delete(session=session, **params)
-            session.commit()
-            location = request.route_url(self.routes['search'])
-            raise HTTPFound(location=location)
+            try:
+                super(DeformBase, self).delete(session=session, **params)
+                session.commit()
+
+            except:
+                log.exception('Error during delete')
+                session.rollback()
+                if error_message:
+                    m = error_message if not error_exception_tb \
+                                      else "{}: {}".format(error_message, e)
+                    request.session.flash(m, error_queue)
+
+            else:
+                if success_message:
+                    request.session.flash(success_message, success_queue)
+
+            finally:
+                location = request.route_url(self.routes['search'])
+                raise HTTPFound(location=location)
 
         else:
             obj = super(DeformBase, self).read(session=session, **params)

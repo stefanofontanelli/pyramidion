@@ -7,13 +7,16 @@ import math
 
 class SQLAChosenSingleWidget(ChosenSingleWidget):
 
-    def __init__(self, class_, label, value, **kw):
+    def __init__(self, class_, label, value, *filters, **kw):
         self.class_ = class_
         self.label = label
         self.value = value
+        self.filters = filters
         ChosenSingleWidget.__init__(self, **kw)
 
     def populate(self, session, *filters):
+        if not filters:
+            filters = self.filters
         class_ = DottedNameResolver().resolve(self.class_)
         query = session.query(getattr(class_, self.value),
                               getattr(class_, self.label))

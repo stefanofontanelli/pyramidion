@@ -21,7 +21,10 @@ class SQLAChosenSingleWidget(ChosenSingleWidget):
         class_ = DottedNameResolver().resolve(self.class_)
         query = session.query(getattr(class_, self.value),
                               getattr(class_, self.label))
-        order_by = getattr(class_, self.order_by)
+        if not self.order_by is None:
+            order_by = getattr(class_, self.order_by)
+        else:
+            order_by = None
         query = query.filter(*filters).order_by(order_by)
         self.values = [('', '')] + [t for t in query.all()]
 

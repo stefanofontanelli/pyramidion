@@ -7,7 +7,7 @@ import math
 
 class SQLAChosenSingleWidget(ChosenSingleWidget):
 
-    def __init__(self, class_, label, value, order_by, *filters, **kw):
+    def __init__(self, class_, label, value, order_by=None, *filters, **kw):
         self.class_ = class_
         self.label = label
         self.value = value

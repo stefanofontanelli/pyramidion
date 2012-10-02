@@ -132,10 +132,10 @@ class DeformBase(crudalchemy.Base):
         if 'submit' in request.POST:
 
             controls = request.POST.items()
+            session = self.session or getattr(request, self.db_session_key)
 
             try:
                 values = form.validate(controls)
-                session = self.session or getattr(request, self.db_session_key)
                 obj = super(DeformBase, self).create(session=session,
                                                      validate=False,
                                                      **values)

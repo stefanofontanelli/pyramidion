@@ -7,11 +7,12 @@ import math
 
 class SQLAChosenSingleWidget(ChosenSingleWidget):
 
-    def __init__(self, class_, label, value, *filters, **kw):
+    def __init__(self, class_, label, value, order_by, *filters, **kw):
         self.class_ = class_
         self.label = label
         self.value = value
         self.filters = filters
+        self.order_by = order_by
         ChosenSingleWidget.__init__(self, **kw)
 
     def populate(self, session, *filters):
@@ -20,7 +21,9 @@ class SQLAChosenSingleWidget(ChosenSingleWidget):
         class_ = DottedNameResolver().resolve(self.class_)
         query = session.query(getattr(class_, self.value),
                               getattr(class_, self.label))
-        self.values = [('', '')] + [t for t in query.filter(*filters).all()]
+        order_by = getattr(class_, self.order_by)
+        query = query.filter(*filters).order_by(order_by)
+        self.values = [('', '')] + [t for t in query.all()]
 
 
 class Paginator(object):

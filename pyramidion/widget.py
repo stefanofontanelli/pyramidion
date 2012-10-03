@@ -25,7 +25,7 @@ class SQLAChosenSingleWidget(ChosenSingleWidget):
             order_by = getattr(class_, self.order_by)
         else:
             order_by = None
-        query = query.filter(*filters).order_by(order_by)
+        query = query.filter(*filters).order_by(order_by).distinct()
         self.values = [('', '')] + [t for t in query.all()]
 
 

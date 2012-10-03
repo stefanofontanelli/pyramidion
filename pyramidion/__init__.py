@@ -136,7 +136,9 @@ class DeformBase(crudalchemy.Base):
             session = self.session or getattr(request, self.db_session_key)
 
             try:
-                values = form.validate(controls)
+                values = {name: value
+                          for name, value in form.validate(controls).items()
+                          if not value is None}
                 obj = super(DeformBase, self).create(session=session,
                                                      validate=False,
                                                      **values)
@@ -208,7 +210,9 @@ class DeformBase(crudalchemy.Base):
             controls = request.POST.items()
 
             try:
-                values = form.validate(controls)
+                values = {name: value
+                          for name, value in form.validate(controls).items()
+                          if not value is None}
                 obj = super(DeformBase, self).update(session=session,
                                                      validate=False,
                                                      **values)
@@ -237,7 +241,9 @@ class DeformBase(crudalchemy.Base):
 
         else:
             obj = super(DeformBase, self).read(session=session, **params)
-            values = self.update_schema.dictify(obj)
+            values = {name: value
+                      for name, value in self.update_schema.dictify(obj).items()
+                      if not value is None}
             error = None
 
         return {'form': form, 'error': error, 'values': values}

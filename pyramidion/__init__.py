@@ -194,6 +194,15 @@ class DeformBase(crudalchemy.Base):
         params = {name : request.matchdict[name]
                   for name in self.mapping_registry.pkeys}
 
+        session = self.session or getattr(request, self.db_session_key)
+
+        for node in self.update_schema:
+            try:
+                node.widget.populate(session)
+
+            except AttributeError:
+                continue
+
         form = Form(self.update_schema,
                     action=request.route_url(self.routes['update'], **params),
                     buttons=(Button(name='submit',
@@ -202,8 +211,6 @@ class DeformBase(crudalchemy.Base):
                                     value='submit'),),
                     bootstrap_form_style='form-horizontal',
                     formid=self.routes['update'])
-
-        session = self.session or getattr(request, self.db_session_key)
 
         if 'submit' in request.POST:
 

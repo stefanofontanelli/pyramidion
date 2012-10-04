@@ -26,7 +26,7 @@ class SQLAChosenSingleWidget(ChosenSingleWidget):
         else:
             order_by = None
         query = query.filter(*filters).order_by(order_by).distinct()
-        self.values = [('', '')] + [t for t in query.all()]
+        self.values = [('', '')] + [(str(t[0]), str(t[1])) for t in query.all()]
 
 
 class Paginator(object):

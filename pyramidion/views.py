@@ -4,12 +4,19 @@
 # This module is released under the MIT License
 # http://www.opensource.org/licenses/mit-license.php
 
+from deform import (Button,
+                    ValidationFailure)
 from deformalchemy import SQLAlchemyForm
-from pyramid.decorator import reify
+from sqlalchemy.exc import IntegrityError 
+import colander
+import logging
+
+log = logging.getLogger(__file__)
+
 
 class DeformBase(object):
 
-    methods = ['create', 'edit', 'update', 'delete', 'search']
+    methods = ['new', 'create', 'update', 'delete', 'search']
 
     def __init__(self, cls, session=None, db_session_key='db_session'):
         self.cls = cls
@@ -18,68 +25,95 @@ class DeformBase(object):
         self.routes = {key: '{}_{}'.format(cls.__name__.lower(), key)
                        for key in self.methods}
 
-    def create(self, context, request):
-
+    def new(self, context, request):
+        """ Render form to create a new object.
+            Fill the form with values passed via query string.
+        """
         response = {}
-
         try:
-            if 'submit' in request.POST:
-                values = self.get_create_params(request)
-                obj = self.create_obj(request, **values)
+            params = self.get_new_params(request)
+            form = self.get_new_form(request)
+            if params:
+                values = form.validate(params).items()
+
+            else:
+                values = colander.null
+
+            form = form.render(values)
 
         except ValidationFailure as e:
             log.exception('Bad request.')
             status = 400
-            error = e
-            values = colander.null
-
-        except IntegrityError:
-            log.exception('Conflict.')
-            status = 409
-            error = e
-            values = colander.null
+            form = e.render()
 
         except Exception:
             log.exception('Unknown error.')
             status = 500
-            error = e
-            values = colander.null
+            form = ''
 
         else:
-            status = 201 if 'submit' in request.POST else 200
-            error =  None
-            values = colander.null
+            status = 200
 
         finally:
             request.response.status = status
             response['status'] = status
-            response['error'] = error
-            response['values'] = values
-            response['form'] = self.create_form
+            response['form'] = form
+
+        return response
+
+    def get_new_params(self, request):
+        return request.GET.items()
+
+    def get_new_form(self, request):
+        route_name = self.routes['create']
+        save = Button(name='submit',
+                      title='Save',
+                      type='submit',
+                      value='submit')
+        return SQLAlchemyForm(self.cls,
+                              action=request.route_url(route_name),
+                              formid=route_name,
+                              buttons=(save,),
+                              bootstrap_form_style='form-horizontal')
+
+    def create(self, context, request):
+        response = {}
+        try:
+            params = self.get_create_params(request)
+            form = self.get_new_form(request)
+            values = {name: value
+                      for name, value in form.validate(params).items()
+                      if not value is colander.null}
+            obj = self.create_obj(request, **values)
+
+        except ValidationFailure as e:
+            log.exception('Bad request.')
+            status = 400
+            form = e.render()
+
+        except IntegrityError:
+            log.exception('Conflict.')
+            status = 409
+            form = form.render(values)
+
+        except Exception:
+            log.exception('Unknown error.')
+            status = 500
+            form = ''
+
+        else:
+            status = 201
+            error =  None
+            values = colander.null
+
+        request.response.status = status
+        response['status'] = status
+        response['form'] = form
 
         return response
 
     def get_create_params(self, request):
-        values = self.create_form.validate(request.POST.items())
-        return {name: value
-                for name, value in values.items()
-                if not value is colander.null}
-
-    @reify
-    def create_form(self):
-        return self.get_default_form(action='create', title='Save')
-
-    def get_default_form(self, action, title, **kw):
-        save_button = Button(name='submit',
-                             title=title,
-                             type='submit',
-                             value='submit')
-        params = dict(action=request.route_url(self.routes[action]),
-                      buttons=(save_button,),
-                      bootstrap_form_style='form-horizontal',
-                      formid=self.routes[action])
-        params.update(kw)
-        return SQLAlchemyForm(self.cls, **params)
+        return request.POST.items()
 
     def create_obj(self, request, **kwargs):
         session = self.session or getattr(request, self.db_session_key)
@@ -136,7 +170,6 @@ class DeformBase(object):
     def get_read_params(self, request):
         return request.matchdict
 
-    @reify
     def read_form(self):
         return self.get_default_form(action='update',
                                      title='Edit',
@@ -197,7 +230,6 @@ class DeformBase(object):
                 for name, value in values.items()
                 if not value is colander.null}
 
-    @reify
     def update_form(self):
         return self.get_default_form(action='update',
                                      title='Save')
@@ -250,7 +282,6 @@ class DeformBase(object):
 
         return response
 
-    @reify
     def delete_form(self):
         return self.get_default_form(action='delete',
                                      title='Delete')
@@ -366,15 +397,15 @@ class DeformBase(object):
         for action in self.routes:
 
             resource = self.cls.__name__.lower()
-            path = '{}/{}/{}'.format(prefix, resource, action)
-            if action in set(['read', 'update', 'delete']):
-                pkeys = '/'.join(['{%s}' % name
-                                  for name in self.mapping_registry.pkeys])
-                path = '{}/{}'.format(path, pkeys)
+            path = '{}/{}/{}.html'.format(prefix, resource, action)
+            #if action in set(['read', 'update', 'delete']):
+            #    pkeys = '/'.join(['{%s}' % name
+            #                      for name in self.mapping_registry.pkeys])
+            #    path = '{}/{}'.format(path, pkeys)
 
             config.add_route(self.routes[action], path)
 
-            tpl = '/{}/{}.mako'.format(resource, action)
+            tpl = '/{}.mako'.format(action)
             config.add_view(getattr(self, action),
                             route_name=self.routes[action],
                             renderer=tpl,

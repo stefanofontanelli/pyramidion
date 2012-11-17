@@ -1,4 +1,4 @@
-# Copyright (C) 2012 the DeformAlchemy authors and contributors
+# Copyright (C) 2012 the Pyramidion authors and contributors
 # <see AUTHORS file>
 #
 # This module is released under the MIT License
@@ -7,7 +7,10 @@
 from deform import (Button,
                     ValidationFailure)
 from deformalchemy import SQLAlchemyForm
+from pyramid.httpexceptions import HTTPFound
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError 
+from sqlalchemy.orm.exc import NoResultFound
 import colander
 import logging
 
@@ -16,7 +19,8 @@ log = logging.getLogger(__file__)
 
 class DeformBase(object):
 
-    methods = ['new', 'create', 'update', 'delete', 'search']
+    methods = ['new', 'create', 'edit', 'update',
+               'remove', 'delete', 'read', 'search']
 
     def __init__(self, cls, session=None, db_session_key='db_session'):
         self.cls = cls
@@ -24,27 +28,11 @@ class DeformBase(object):
         self.db_session_key = db_session_key
         self.routes = {key: '{}_{}'.format(cls.__name__.lower(), key)
                        for key in self.methods}
+        self.inspector = inspect(cls)
 
     def new(self, context, request):
-        """ Render form to create a new object.
-            Fill the form with values passed via query string.
-        """
-        response = {}
         try:
-            params = self.get_new_params(request)
-            form = self.get_new_form(request)
-            if params:
-                values = form.validate(params).items()
-
-            else:
-                values = colander.null
-
-            form = form.render(values)
-
-        except ValidationFailure as e:
-            log.exception('Bad request.')
-            status = 400
-            form = e.render()
+            form = self.get_new_form(request).render()
 
         except Exception:
             log.exception('Unknown error.')
@@ -54,15 +42,8 @@ class DeformBase(object):
         else:
             status = 200
 
-        finally:
-            request.response.status = status
-            response['status'] = status
-            response['form'] = form
-
-        return response
-
-    def get_new_params(self, request):
-        return request.GET.items()
+        request.response.status = status
+        return {'status': status, 'form': form}
 
     def get_new_form(self, request):
         route_name = self.routes['create']
@@ -77,7 +58,6 @@ class DeformBase(object):
                               bootstrap_form_style='form-horizontal')
 
     def create(self, context, request):
-        response = {}
         try:
             params = self.get_create_params(request)
             form = self.get_new_form(request)
@@ -99,18 +79,17 @@ class DeformBase(object):
         except Exception:
             log.exception('Unknown error.')
             status = 500
-            form = ''
+            form = form.render(values)
 
         else:
             status = 201
-            error =  None
-            values = colander.null
+            pks = {p.key: getattr(obj, p.key)
+                   for p in self.inspector.column_attrs
+                   if p.columns[0] in self.inspector.primary_key}
+            raise HTTPFound(location=request.route_url(self.routes['read'], **pks))
 
         request.response.status = status
-        response['status'] = status
-        response['form'] = form
-
-        return response
+        return {'status': status, 'form': form}
 
     def get_create_params(self, request):
         return request.POST.items()
@@ -131,112 +110,143 @@ class DeformBase(object):
         return obj
 
     def read(self, context, request):
-
-        response = {}
-
         try:
-            obj = self.read_obj(request, **self.get_read_params(request))
-            values = self.read_form.dictify(obj)
-
-        except ValidationFailure as e:
-            log.exception('Bad request.')
-            status = 400
-            error = e
+            params = self.get_read_params(request)
+            obj = self.read_obj(request, **params)
+            form = self.get_read_form(request, **params)
+            values = form.dictify(obj)
 
         except NoResultFound as e:
             log.exception('No result found.')
             status = 404
-            error = e
+            form = ''
 
         except Exception:
             log.exception('Unknown error.')
             status = 500
-            error = e
+            form = ''
 
         else:
             status = 200
-            error =  None
-            values = colander.null
+            form = form.render(values)
 
-        finally:
-            request.response.status = status
-            response['status'] = status
-            response['error'] = error
-            response['values'] = values
-            response['form'] = self.read_form
-
-        return response
+        request.response.status = status
+        return {'status': status, 'form': form}
 
     def get_read_params(self, request):
         return request.matchdict
 
-    def read_form(self):
-        return self.get_default_form(action='update',
-                                     title='Edit',
-                                     readonly=True)
+    def get_read_form(self, request, **pks):
+        route_name = self.routes['edit']
+        edit = Button(name='submit',
+                      title='Edit',
+                      type='submit',
+                      value='submit')
+        action = request.route_url(route_name, **pks)
+        return SQLAlchemyForm(self.cls,
+                              action=action,
+                              method='POST',
+                              formid=route_name,
+                              buttons=(edit,),
+                              readonly=True,
+                              bootstrap_form_style='form-horizontal')
 
     def read_obj(self, request, **kwargs):
         session = self.session or getattr(request, self.db_session_key)
         return self.cls.read(session=session, **kwargs)
 
-    def update(self, context, request):
-
-        response = {}
-
+    def edit(self, context, request):
         try:
-            if 'submit' in request.POST:
-                params = self.get_update_params(request)
-                obj = self.update_obj(request, **params)
-                values = self.update_form.dictify(obj)
+            params = self.get_edit_params(request)
+            obj = self.read_obj(request, **params)
+            form = self.get_edit_form(request, **params)
+            values = form.dictify(obj)
 
-            else:
-                obj = self.read_obj(request, **self.get_read_params(request))
-                values = self.update_form.dictify(obj)
-
-        except ValidationFailure as e:
-            log.exception('Bad request.')
-            status = 400
-            error = e
-            values = colander.null
-
-        except NoResultFound:
+        except NoResultFound as e:
             log.exception('No result found.')
             status = 404
-            error = e
-            values = colander.null
+            form = ''
 
         except Exception:
             log.exception('Unknown error.')
             status = 500
-            error = e
-            values = colander.null
+            form = ''
 
         else:
             status = 200
-            error =  None
+            form = form.render(values)
 
-        finally:
-            request.response.status = status
-            response['status'] = status
-            response['error'] = error
-            response['values'] = values
-            response['form'] = self.update_form
+        request.response.status = status
+        return {'status': status, 'form': form}
 
-        return response
+    def get_edit_params(self, request):
+        return request.matchdict
+
+    def get_edit_form(self, request, **pks):
+        route_name = self.routes['update']
+        save = Button(name='submit',
+                      title='Save',
+                      type='submit',
+                      value='submit')
+        return SQLAlchemyForm(self.cls,
+                              action=request.route_url(route_name, **pks),
+                              formid=route_name,
+                              buttons=(save,),
+                              readonly=True,
+                              bootstrap_form_style='form-horizontal')
+
+    def update(self, context, request):
+        try:
+            pks, params = self.get_update_params(request)
+            form = self.get_edit_form(request, **pks)
+            values = form.validate(params)
+            obj = self.update_obj(request, pks, **values)
+
+        except ValidationFailure as e:
+            log.exception('Bad request.')
+            status = 400
+            form = e.render()
+
+        except NoResultFound:
+            log.exception('No result found.')
+            status = 404
+            form = ''
+
+        except Exception:
+            log.exception('Unknown error.')
+            status = 500
+            form = ''
+
+        else:
+            status = 200
+            pks = {p.key: getattr(obj, p.key)
+                   for p in self.inspector.column_attrs
+                   if p.columns[0] in self.inspector.primary_key}
+            raise HTTPFound(location=request.route_url(self.routes['read'], **pks))
+
+        request.response.status = status
+        return {'status': status, 'form': form}
 
     def get_update_params(self, request):
-        values = self.update_form.validate(request.POST.items())
-        return {name: value
-                for name, value in values.items()
-                if not value is colander.null}
+        return request.matchdict, request.POST.items()
 
-    def update_form(self):
-        return self.get_default_form(action='update',
-                                     title='Save')
-
-    def update_obj(self, request, **kwargs):
+    def update_obj(self, request, pkeys, **values):
         session = self.session or getattr(request, self.db_session_key)
-        return self.cls.update(session=session, **kwargs)
+        try:
+            obj = self.cls.update(session, pkeys, **values)
+
+        except Exception as e:
+            log.exception('Error during create')
+            session.rollback()
+            raise e
+
+        else:
+            session.commit()
+
+        return obj
+
+    def remove(self, context, request):
+        pass
 
     def delete(self, context, request):
 
@@ -395,13 +405,15 @@ class DeformBase(object):
     def setup_routing(self, config, prefix=''):
 
         for action in self.routes:
-
             resource = self.cls.__name__.lower()
-            path = '{}/{}/{}.html'.format(prefix, resource, action)
-            #if action in set(['read', 'update', 'delete']):
-            #    pkeys = '/'.join(['{%s}' % name
-            #                      for name in self.mapping_registry.pkeys])
-            #    path = '{}/{}'.format(path, pkeys)
+            path = '{}/{}/{}'.format(prefix, resource, action)
+            if action in ('read', 'edit', 'update', 'remove', 'delete'):
+                pks = ['{' + p.key + '}'
+                       for p in self.inspector.column_attrs
+                       if p.columns[0] in self.inspector.primary_key]
+                path = '{}/{}'.format(path, '/'.join(pks))
+
+            print action, path
 
             config.add_route(self.routes[action], path)
 

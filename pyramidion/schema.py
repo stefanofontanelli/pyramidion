@@ -1,18 +1,17 @@
-# __init__.py
 # Copyright (C) 2012 the Pyramidion authors and contributors
 # <see AUTHORS file>
 #
 # This module is part of Pyramidion and is released under
 # the MIT License: http://www.opensource.org/licenses/mit-license.php
 
-from colanderalchemy import SQLAlchemyMapping
+from colanderalchemy import SQLAlchemySchemaNode
 import colander
 
 
 __all__ = ['ReadSchema']
 
 
-class ReadSchema(SQLAlchemyMapping):
+class ReadSchema(SQLAlchemySchemaNode):
 
     def __init__(self, cls, excludes=None, includes=None, nullables=None,
                  unknown='raise', column_comparators=['__eq__', '__le__',

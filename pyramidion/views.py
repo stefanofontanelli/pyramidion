@@ -32,69 +32,105 @@ class DeformBase(object):
 
     def new(self, context, request):
         try:
-            form = self.get_new_form(request).render()
+            response = self.get_new_response(context, request)
 
-        except Exception:
+        except Exception as e:
             log.exception('Unknown error.')
-            status = 500
-            form = ''
+            request.response.status = 500
+            response = self.get_new_500_response(context, request, e)
+
+        finally:
+            return response
+
+    def get_new_response(self, context, request):
+        return {'form': self.get_create_form(context, request).render()}
+
+    def get_new_500_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def create(self, context, request):
+        try:
+            response = self.get_create_response(context, request)
+
+        except Exception as e:
+            log.exception('Unknown error.')
+            request.response.status = 500
+            response = self.get_create_500_response(context, request, e)
+
+        finally:
+            return response
+
+    def get_create_response(self, context, request):
+
+        try:
+            params = self.get_create_params(context, request)
+
+        except ValidationFailure as e:
+            log.exception('Bad request.')
+            request.response.status = 400
+            response = self.get_create_400_response(context, request, e)
 
         else:
-            status = 200
+            try:
+                obj = self.do_create(context, request, **values)
 
-        request.response.status = status
-        return {'status': status, 'form': form}
+            except IntegrityError as e:
+                log.exception('Conflict.')
+                status = 409
+                response = self.get_create_409_response(context, request, e)
 
-    def get_new_form(self, request):
+            except Exception as e:
+                log.exception('Unknown error.')
+                status = 500
+                response = self.get_create_500_response(context, request, e)
+
+            else:
+                pks = {p.key: getattr(obj, p.key)
+                       for p in self.inspector.column_attrs
+                       if p.columns[0] in self.inspector.primary_key}
+                form = self.get_read_form(context, request, **pks)
+                response = {'form': form.render(params)}
+
+        return response
+
+    def get_create_400_response(self, context, request, exc):
+        return {'form': exc.render()}
+
+    def get_create_409_response(self, context, request, exc):
+        form = self.get_create_form(context, request)
+        values = self.get_create_params(context. request)
+        return {'form': form.render(values), 'error': str(exc)}
+
+    def get_create_500_response(self, context, request, exc):
+        form = self.get_create_form(context, request)
+        values = self.get_create_params(context. request)
+        return {'form': form.render(values), 'error': str(exc)}
+
+    def get_create_params(self, context, request):
+        params = request.POST.items()
+        form = self.get_create_form(request)
+        return {name: value
+                for name, value in form.validate(params).items()
+                if not value is colander.null}
+
+    def get_create_form(self, context, request):
         route_name = self.routes['create']
+        action = request.route_url(route_name)
         save = Button(name='submit',
                       title='Save',
                       type='submit',
                       value='submit')
-        return SQLAlchemyForm(self.cls,
-                              action=request.route_url(route_name),
+        style = 'form-horizontal'
+        form = SQLAlchemyForm(self.cls,
+                              action=action,
                               formid=route_name,
                               buttons=(save,),
-                              bootstrap_form_style='form-horizontal')
+                              bootstrap_form_style=style)
+        session = self.session or getattr(request, self.db_session_key)
+        form.populate_widgets(session)
+        return form
 
-    def create(self, context, request):
-        try:
-            params = self.get_create_params(request)
-            form = self.get_new_form(request)
-            values = {name: value
-                      for name, value in form.validate(params).items()
-                      if not value is colander.null}
-            obj = self.create_obj(request, **values)
-
-        except ValidationFailure as e:
-            log.exception('Bad request.')
-            status = 400
-            form = e.render()
-
-        except IntegrityError:
-            log.exception('Conflict.')
-            status = 409
-            form = form.render(values)
-
-        except Exception:
-            log.exception('Unknown error.')
-            status = 500
-            form = form.render(values)
-
-        else:
-            status = 201
-            pks = {p.key: getattr(obj, p.key)
-                   for p in self.inspector.column_attrs
-                   if p.columns[0] in self.inspector.primary_key}
-            raise HTTPFound(location=request.route_url(self.routes['read'], **pks))
-
-        request.response.status = status
-        return {'status': status, 'form': form}
-
-    def get_create_params(self, request):
-        return request.POST.items()
-
-    def create_obj(self, request, **kwargs):
+    def do_create(self, context, request, **kwargs):
         session = self.session or getattr(request, self.db_session_key)
         try:
             obj = self.cls.create(session=session, **kwargs)
@@ -111,132 +147,199 @@ class DeformBase(object):
 
     def read(self, context, request):
         try:
-            params = self.get_read_params(request)
-            obj = self.read_obj(request, **params)
-            form = self.get_read_form(request, **params)
-            values = form.dictify(obj)
+            response = self.get_read_response(context, request)
+
+        except Exception as e:
+            log.exception('Unknown error.')
+            request.response.status = 500
+            response = self.get_read_500_response(context, request, e)
+
+        finally:
+            return response
+
+    def get_read_response(self, context, request):
+        try:
+            params = self.get_read_params(context, request)
+            obj = self.do_read(context, request, **params)
+
+        except KeyError as e:
+            log.exception('Bad request.')
+            request.response.status = 400
+            return self.get_read_400_response(context, request, e)
 
         except NoResultFound as e:
             log.exception('No result found.')
-            status = 404
-            form = ''
-
-        except Exception:
-            log.exception('Unknown error.')
-            status = 500
-            form = ''
+            request.response.status = 404
+            return self.get_read_404_response(context, request, e)
 
         else:
-            status = 200
-            form = form.render(values)
+            form = self.get_edit_form(request, **params)
+            values = form.dictify(obj)
+            response = {'form': form.render(values)}
 
-        request.response.status = status
-        return {'status': status, 'form': form}
+        return response
 
-    def get_read_params(self, request):
+    def get_read_400_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_read_404_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_read_500_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_read_params(self, context, request):
         return request.matchdict
 
-    def get_read_form(self, request, **pks):
+    def do_read(self, context, request, **kwargs):
+        session = self.session or getattr(request, self.db_session_key)
+        return self.cls.read(session=session, **kwargs)
+
+    def edit(self, context, request):
+        try:
+            response = self.get_edit_response(context, request)
+
+        except Exception as e:
+            log.exception('Unknown error.')
+            request.response.status = 500
+            response = self.get_edit_500_response(context, request, e)
+
+        finally:
+            return response
+
+    def get_edit_response(self, context, request, exc):
+        params = self.get_edit_params(context, request)
+        try:
+            obj = self.do_edit(context, request, **params)
+
+        except KeyError as e:
+            log.exception('Bad request.')
+            request.response.status = 400
+            return self.get_edit_400_response(context, request, e)
+
+        except NoResultFound as e:
+            log.exception('No result found.')
+            request.response.status = 404
+            return self.get_edit_404_response(context, request, e)
+
+        else:
+            form = self.get_update_form(request, **params)
+            values = form.dictify(obj)
+            response = {'form': form.render(values)}
+
+        return response
+
+    def get_edit_400_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_edit_404_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_edit_500_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_edit_params(self, context, request):
+        return request.matchdict
+
+    def get_edit_form(self, context, request, **pks):
         route_name = self.routes['edit']
         edit = Button(name='submit',
                       title='Edit',
                       type='submit',
                       value='submit')
         action = request.route_url(route_name, **pks)
-        return SQLAlchemyForm(self.cls,
+        form = SQLAlchemyForm(self.cls,
                               action=action,
-                              method='POST',
                               formid=route_name,
                               buttons=(edit,),
                               readonly=True,
                               bootstrap_form_style='form-horizontal')
+        session = self.session or getattr(request, self.db_session_key)
+        form.populate_widgets(session)
+        return form
 
-    def read_obj(self, request, **kwargs):
+    def do_edit(self, context, request, **kwargs):
         session = self.session or getattr(request, self.db_session_key)
         return self.cls.read(session=session, **kwargs)
 
-    def edit(self, context, request):
+    def update(self, context, request):
         try:
-            params = self.get_edit_params(request)
-            obj = self.read_obj(request, **params)
-            form = self.get_edit_form(request, **params)
-            values = form.dictify(obj)
+            response = self.get_update_response(context, request)
 
-        except NoResultFound as e:
-            log.exception('No result found.')
-            status = 404
-            form = ''
-
-        except Exception:
+        except Exception as e:
             log.exception('Unknown error.')
-            status = 500
-            form = ''
+            request.response.status = 500
+            response = self.get_update_500_response(context, request, e)
+
+        finally:
+            return response
+
+    def get_update_response(self, context, request):
+        pks, values = self.get_update_params(context, request)
+        try:
+            obj = self.do_update(context, request, pks, **values)
+
+        except ValidationFailure as e:
+            log.exception('Bad request.')
+            request.response.status = 400
+            response = self.get_update_400_response(context, request, e)
+
+        except NoResultFound:
+            log.exception('No result found.')
+            request.response.status = 404
+            response = self.get_update_404_response(context, request, e)
 
         else:
-            status = 200
-            form = form.render(values)
+            # Build pks again to get right values from obj:
+            # update can be changed them.
+            pks = {p.key: getattr(obj, p.key)
+                   for p in self.inspector.column_attrs
+                   if p.columns[0] in self.inspector.primary_key}
+            form = self.get_update_form(request, **pks)
+            values = form.dictify(obj)
+            response = {'form': form.render(values)}
 
-        request.response.status = status
-        return {'status': status, 'form': form}
+        return response
 
-    def get_edit_params(self, request):
-        return request.matchdict
+    def get_update_400_response(self, context, request, exc):
+        return {'form': exc.render(), 'error': str(exc)}
 
-    def get_edit_form(self, request, **pks):
+    def get_update_404_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_update_500_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_update_params(self, context, request):
+        pks = request.matchdict
+        params = request.POST.items()
+        form = self.get_update_form(request, **pks)
+        values = form.validate(params)
+        return pks, values
+
+    def get_update_form(self, request, **pks):
         route_name = self.routes['update']
         save = Button(name='submit',
                       title='Save',
                       type='submit',
                       value='submit')
-        return SQLAlchemyForm(self.cls,
+        form = SQLAlchemyForm(self.cls,
                               action=request.route_url(route_name, **pks),
                               formid=route_name,
                               buttons=(save,),
                               readonly=True,
                               bootstrap_form_style='form-horizontal')
+        session = self.session or getattr(request, self.db_session_key)
+        form.populate_widgets(session)
+        return form
 
-    def update(self, context, request):
-        try:
-            pks, params = self.get_update_params(request)
-            form = self.get_edit_form(request, **pks)
-            values = form.validate(params)
-            obj = self.update_obj(request, pks, **values)
-
-        except ValidationFailure as e:
-            log.exception('Bad request.')
-            status = 400
-            form = e.render()
-
-        except NoResultFound:
-            log.exception('No result found.')
-            status = 404
-            form = ''
-
-        except Exception:
-            log.exception('Unknown error.')
-            status = 500
-            form = ''
-
-        else:
-            status = 200
-            pks = {p.key: getattr(obj, p.key)
-                   for p in self.inspector.column_attrs
-                   if p.columns[0] in self.inspector.primary_key}
-            raise HTTPFound(location=request.route_url(self.routes['read'], **pks))
-
-        request.response.status = status
-        return {'status': status, 'form': form}
-
-    def get_update_params(self, request):
-        return request.matchdict, request.POST.items()
-
-    def update_obj(self, request, pkeys, **values):
+    def do_update(self, context, request, pks, **values):
         session = self.session or getattr(request, self.db_session_key)
         try:
-            obj = self.cls.update(session, pkeys, **values)
+            obj = self.cls.update(session, pks, **values)
 
         except Exception as e:
-            log.exception('Error during create')
+            log.exception('Error during update')
             session.rollback()
             raise e
 
@@ -246,70 +349,171 @@ class DeformBase(object):
         return obj
 
     def remove(self, context, request):
-        pass
-
-    def delete(self, context, request):
-
-        response = {}
-
         try:
-            if 'submit' in request.POST:
-                self.delete_obj(request, **self.get_read_params(request))
-                values = colander.null
+            params = request.matchdict
+            obj = self.read_obj(request, **params)
+            form = self.get_remove_form(request, **params)
+            values = form.dictify(obj)
 
-            else:
-                obj = self.read_obj(request, **self.get_read_params(request))
-                values = self.delete_form.dictify(obj)
-
-        except ValidationFailure as e:
-            log.exception('Bad request.')
-            status = 400
-            error = e
-            values = colander.null
-
-        except NoResultFound:
+        except NoResultFound as e:
             log.exception('No result found.')
             status = 404
-            error = e
-            values = colander.null
+            form = ''
 
         except Exception:
             log.exception('Unknown error.')
             status = 500
-            error = e
-            values = colander.null
+            form = ''
 
         else:
             status = 200
-            error =  None
+            form = form.render(values)
+
+        request.response.status = status
+        return {'status': status, 'form': form}
+
+    def remove(self, context, request):
+        try:
+            response = self.get_remove_response(context, request)
+
+        except Exception as e:
+            log.exception('Unknown error.')
+            request.response.status = 500
+            response = self.get_remove_500_response(context, request, e)
 
         finally:
-            request.response.status = status
-            response['status'] = status
-            response['error'] = error
-            response['values'] = values
-            response['form'] = self.update_form
+            return response
+
+    def get_remove_response(self, context, request):
+        try:
+            params = self.get_remove_params(context, request)
+            obj = self.do_remove(context, request, **params)
+
+        except KeyError as e:
+            log.exception('Bad request.')
+            request.response.status = 400
+            return self.get_remove_400_response(context, request, e)
+
+        except NoResultFound as e:
+            log.exception('No result found.')
+            request.response.status = 404
+            return self.get_remove_404_response(context, request, e)
+
+        else:
+            form = self.get_delete_form(request, **params)
+            values = form.dictify(obj)
+            response = {'form': form.render(values)}
 
         return response
 
-    def delete_form(self):
-        return self.get_default_form(action='delete',
-                                     title='Delete')
+    def get_remove_400_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
 
-    def delete_obj(self, request, **kwargs):
+    def get_remove_404_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_remove_500_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_remove_params(self, context, request):
+        return request.matchdict
+
+    def do_remove(self, context, request, **kwargs):
         session = self.session or getattr(request, self.db_session_key)
-        return self.cls.delete(session=session, **kwargs)
+        return self.cls.read(session=session, **kwargs)
+
+    def delete(self, context, request):
+        try:
+            response = self.get_delete_response(context, request)
+
+        except Exception as e:
+            log.exception('Unknown error.')
+            request.response.status = 500
+            response = self.get_delete_500_response(context, request, e)
+
+        finally:
+            return response
+
+    def get_delete_response(self, context, request):
+        pks = self.get_delete_params(context, request)
+        try:
+            obj = self.do_delete(context, request, pks)
+
+        except KeyError as e:
+            log.exception('Bad request.')
+            request.response.status = 400
+            response = self.get_delete_400_response(context, request, e)
+
+        except NoResultFound:
+            log.exception('No result found.')
+            request.response.status = 404
+            response = self.get_delete_404_response(context, request, e)
+
+        else:
+            response = {}
+
+        return response
+
+    def get_delete_400_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_delete_404_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_delete_500_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_delete_params(self, context, request):
+        return request.matchdict
+
+    def get_delete_form(self, request, **pks):
+        route_name = self.routes['delete']
+        btn = Button(name='submit',
+                     title='Delete',
+                     type='submit',
+                     value='submit')
+        form = SQLAlchemyForm(self.cls,
+                              action=request.route_url(route_name, **pks),
+                              formid=route_name,
+                              buttons=(btn,),
+                              readonly=True,
+                              bootstrap_form_style='form-horizontal')
+        session = self.session or getattr(request, self.db_session_key)
+        form.populate_widgets(session)
+        return form
+
+    def do_delete(self, context, request, pks):
+        session = self.session or getattr(request, self.db_session_key)
+        try:
+            self.cls.delete(session, pks)
+
+        except Exception as e:
+            log.exception('Error during delete')
+            session.rollback()
+            raise e
+
+        else:
+            session.commit()
+
+        return None
 
     def search(self, context, request):
+        try:
+            response = self.get_search_response(context, request)
 
+        except Exception as e:
+            log.exception('Unknown error.')
+            request.response.status = 500
+            response = self.get_search_500_response(context, request, e)
+
+        finally:
+            return response
+
+    def get_search_response(self, context, request):
+
+        criterions, params = self.get_search_params(self, context, request)
         session = self.session or getattr(request, self.db_session_key)
-
-        for node in self.search_schema:
-            try:
-                node.widget.populate(session)
-
-            except AttributeError:
-                continue
+        form.populate_widgets(session)
 
         form = Form(self.search_schema,
                     action=request.route_url(self.routes['search']),

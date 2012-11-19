@@ -8,6 +8,11 @@ from collections import namedtuple
 import math
 
 
+class ResultList(object):
+
+    def __init__(self, cols=None, items=None):
+
+
 class Paginator(object):
 
     def __init__(self, total, start, limit, factory=None):

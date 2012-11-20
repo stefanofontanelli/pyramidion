@@ -4,6 +4,7 @@
 # This module is released under the MIT License
 # http://www.opensource.org/licenses/mit-license.php
 
+from .form import SQLAlchemySearchForm
 from deform import (Button,
                     ValidationFailure)
 from deformalchemy import SQLAlchemyForm
@@ -37,6 +38,7 @@ class DeformBase(object):
         except Exception as e:
             log.exception('Unknown error.')
             request.response.status = 500
+            raise e
             response = self.get_new_500_response(context, request, e)
 
         finally:
@@ -57,8 +59,7 @@ class DeformBase(object):
             request.response.status = 500
             response = self.get_create_500_response(context, request, e)
 
-        finally:
-            return response
+        return response
 
     def get_create_response(self, context, request):
 
@@ -72,7 +73,7 @@ class DeformBase(object):
 
         else:
             try:
-                obj = self.do_create(context, request, **values)
+                obj = self.do_create(context, request, **params)
 
             except IntegrityError as e:
                 log.exception('Conflict.')
@@ -88,7 +89,7 @@ class DeformBase(object):
                 pks = {p.key: getattr(obj, p.key)
                        for p in self.inspector.column_attrs
                        if p.columns[0] in self.inspector.primary_key}
-                form = self.get_read_form(context, request, **pks)
+                form = self.get_edit_form(context, request, **pks)
                 response = {'form': form.render(params)}
 
         return response
@@ -98,17 +99,17 @@ class DeformBase(object):
 
     def get_create_409_response(self, context, request, exc):
         form = self.get_create_form(context, request)
-        values = self.get_create_params(context. request)
+        values = self.get_create_params(context, request)
         return {'form': form.render(values), 'error': str(exc)}
 
     def get_create_500_response(self, context, request, exc):
         form = self.get_create_form(context, request)
-        values = self.get_create_params(context. request)
+        values = self.get_create_params(context, request)
         return {'form': form.render(values), 'error': str(exc)}
 
     def get_create_params(self, context, request):
         params = request.POST.items()
-        form = self.get_create_form(request)
+        form = self.get_create_form(context, request)
         return {name: value
                 for name, value in form.validate(params).items()
                 if not value is colander.null}
@@ -174,7 +175,7 @@ class DeformBase(object):
 
         else:
             form = self.get_edit_form(request, **params)
-            values = form.dictify(obj)
+            values = form.schema.dictify(obj)
             response = {'form': form.render(values)}
 
         return response
@@ -207,7 +208,7 @@ class DeformBase(object):
         finally:
             return response
 
-    def get_edit_response(self, context, request, exc):
+    def get_edit_response(self, context, request):
         params = self.get_edit_params(context, request)
         try:
             obj = self.do_edit(context, request, **params)
@@ -224,7 +225,7 @@ class DeformBase(object):
 
         else:
             form = self.get_update_form(request, **params)
-            values = form.dictify(obj)
+            values = form.schema.dictify(obj)
             response = {'form': form.render(values)}
 
         return response
@@ -296,7 +297,7 @@ class DeformBase(object):
                    for p in self.inspector.column_attrs
                    if p.columns[0] in self.inspector.primary_key}
             form = self.get_update_form(request, **pks)
-            values = form.dictify(obj)
+            values = form.schema.dictify(obj)
             response = {'form': form.render(values)}
 
         return response
@@ -353,7 +354,7 @@ class DeformBase(object):
             params = request.matchdict
             obj = self.read_obj(request, **params)
             form = self.get_remove_form(request, **params)
-            values = form.dictify(obj)
+            values = form.schema.dictify(obj)
 
         except NoResultFound as e:
             log.exception('No result found.')
@@ -401,7 +402,7 @@ class DeformBase(object):
 
         else:
             form = self.get_delete_form(request, **params)
-            values = form.dictify(obj)
+            values = form.schema.dictify(obj)
             response = {'form': form.render(values)}
 
         return response
@@ -435,9 +436,9 @@ class DeformBase(object):
             return response
 
     def get_delete_response(self, context, request):
-        pks = self.get_delete_params(context, request)
         try:
-            obj = self.do_delete(context, request, pks)
+            pks = self.get_delete_params(context, request)
+            obj = self.do_delete(context, request, **pks)
 
         except KeyError as e:
             log.exception('Bad request.')
@@ -482,10 +483,10 @@ class DeformBase(object):
         form.populate_widgets(session)
         return form
 
-    def do_delete(self, context, request, pks):
+    def do_delete(self, context, request, **pks):
         session = self.session or getattr(request, self.db_session_key)
         try:
-            self.cls.delete(session, pks)
+            self.cls.delete(session, **pks)
 
         except Exception as e:
             log.exception('Error during delete')
@@ -498,8 +499,9 @@ class DeformBase(object):
         return None
 
     def search(self, context, request):
+        response = self.get_search_response(context, request)
         try:
-            response = self.get_search_response(context, request)
+            pass
 
         except Exception as e:
             log.exception('Unknown error.')
@@ -510,55 +512,9 @@ class DeformBase(object):
             return response
 
     def get_search_response(self, context, request):
-
-        criterions, params = self.get_search_params(self, context, request)
-        session = self.session or getattr(request, self.db_session_key)
-        form.populate_widgets(session)
-
-        form = Form(self.search_schema,
-                    action=request.route_url(self.routes['search']),
-                    method='POST',
-                    buttons=(Button(name='submit',
-                                    title='Search',
-                                    type='submit',
-                                    value='submit'),),
-                    bootstrap_form_style='form-inline')
-
-        if 'start' in request.GET:
-            start = int(request.GET['start'])
-
-        else:
-            start = 0
-
-        if 'limit' in request.GET:
-            limit = int(request.GET['limit'])
-
-        else:
-            limit = 25
-
-        if 'submit' in request.POST:
-
-            controls = request.POST.items()
-
-            try:
-                values = form.validate(controls)
-                error = None
-
-            except ValidationFailure, e:
-                form = None
-                values = colander.null
-                error = e
-
-        else:
-            values = colander.null
-            error = None
-
-        if values is colander.null:
-            criterions = None
-        else:
-            criterions = self.get_search_criterions(values)
-
-        order_by = None
+        """
+        params = self.get_search_params(self, context, request)
+        values = self.validate_search_params(self, request, params)
 
         total = super(DeformBase, self).search(session=session,
                                                criterions=criterions,
@@ -577,34 +533,35 @@ class DeformBase(object):
             'routes': self.routes,
             'paginator': paginator
         }
+        """
+        params = self.get_search_params(request)
+        values = self.validate_search_params(request, params)
+        return {'form': self.get_search_form(request).render(values)}
 
-    def get_search_criterions(self, values):
+    def get_search_params(self, request):
+        return request.params.items()
 
-        criterions = []
-        for attr in values:
+    def validate_search_params(self, request, params):
+        form = self.get_search_form(request)
+        return {name: value
+                for name, value in form.validate(params).items()
+                if not value is colander.null}
 
-            if attr not in self.search_schema:
-                continue
-
-            value = values[attr]
-            if not value:
-                continue
-
-            if isinstance(self.search_schema[attr].typ, colander.DateTime):
-                start = datetime(value.year, value.month, value.day, 0, 0, 0)
-                end = datetime(value.year, value.month, value.day,
-                               59, 59, 59, 999999)
-                criterion = getattr(self.cls, attr).between(start, end)
-
-            elif isinstance(self.search_schema[attr].typ, colander.String):
-                criterion = getattr(self.cls, attr).ilike(value)
-
-            else:
-                criterion = getattr(self.cls, attr) == value
-
-            criterions.append(criterion)
-
-        return criterions
+    def get_search_form(self, request):
+        route_name = self.routes['search']
+        btn = Button(name='submit',
+                     title='Search',
+                     type='submit',
+                     value='submit')
+        form = SQLAlchemySearchForm(self.cls,
+                                    action=request.route_url(route_name),
+                                    method='POST',
+                                    buttons=(btn,),
+                                    formid=route_name,
+                                    bootstrap_form_style='form-inline')
+        session = self.session or getattr(request, self.db_session_key)
+        form.populate_widgets(session)
+        return form
 
     def setup_routing(self, config, prefix=''):
 
@@ -616,8 +573,6 @@ class DeformBase(object):
                        for p in self.inspector.column_attrs
                        if p.columns[0] in self.inspector.primary_key]
                 path = '{}/{}'.format(path, '/'.join(pks))
-
-            print action, path
 
             config.add_route(self.routes[action], path)
 

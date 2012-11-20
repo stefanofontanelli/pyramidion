@@ -5,6 +5,8 @@
 # http://www.opensource.org/licenses/mit-license.php
 
 from .form import SQLAlchemySearchForm
+from .widget import (Paginator,
+                     SearchResult)
 from deform import (Button,
                     ValidationFailure)
 from deformalchemy import SQLAlchemyForm
@@ -515,16 +517,6 @@ class DeformBase(object):
         """
         params = self.get_search_params(self, context, request)
         values = self.validate_search_params(self, request, params)
-
-        total = super(DeformBase, self).search(session=session,
-                                               criterions=criterions,
-                                               raw_query=True).count()
-        items = super(DeformBase, self).search(session=session,
-                                               criterions=criterions,
-                                               order_by=order_by,
-                                               start=start,
-                                               limit=limit)
-        paginator = Paginator(total=total, start=start, limit=limit)
         return {
             'form': form,
             'values': values,
@@ -534,9 +526,27 @@ class DeformBase(object):
             'paginator': paginator
         }
         """
-        params = self.get_search_params(request)
-        values = self.validate_search_params(request, params)
-        return {'form': self.get_search_form(request).render(values)}
+        try:
+            params = self.get_search_params(request)
+            values = self.validate_search_params(request, params)
+            result = self.do_search(context, request, **values)
+
+        except ValidationFailure as e:
+            log.exception('Bad request.')
+            request.response.status = 400
+            response = self.get_update_400_response(context, request, e)
+
+        else:
+            form = self.get_search_form(request)
+            response = {'form': form.render(values), 'result': result}
+
+        return response
+
+    def get_search_400_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
+
+    def get_search_500_response(self, context, request, exc):
+        return {'form': None, 'error': str(exc)}
 
     def get_search_params(self, request):
         return request.params.items()
@@ -562,6 +572,49 @@ class DeformBase(object):
         session = self.session or getattr(request, self.db_session_key)
         form.populate_widgets(session)
         return form
+
+    def do_search(self, context, request, **kwargs):
+        start = kwargs.pop('start', 0)
+        limit = kwargs.pop('limit', 25)
+        order_by = kwargs.pop('order_by', None)
+        direction = kwargs.pop('direction', 'asc')
+        intersect = kwargs.pop('intersect', True)
+
+        if order_by:
+            order_by = [getattr(getattr(self.cls, order_by),
+                                direction)()]
+
+        criterions = []
+        for prop in self.inspector.attrs:
+            name = prop.key
+            attr_criterions = kwargs.pop('{}_criterions'.format(name), None)
+            if not attr_criterions:
+                continue
+
+            for c in criterions:
+                criterion = getattr(getattr(self.cls, name),
+                                    c['comparator'])(c['value'])
+                criterions.append(criterion)
+
+        session = self.session or getattr(request, self.db_session_key)
+        items = self.cls.search(session=session,
+                                criterions=criterions,
+                                order_by=order_by,
+                                start=start,
+                                limit=limit,
+                                intersect=intersect)
+        cols = self.get_search_columns()
+        total = self.cls.search(session=session,
+                                criterions=criterions,
+                                raw_query=True).count()
+        paginator = Paginator(total=total, start=start, limit=limit)
+        return SearchResult(results=items,
+                            cols=cols,
+                            paginator=paginator)
+
+    def get_search_columns(self):
+        return [p.key for p in self.inspector.attrs]
+
 
     def setup_routing(self, config, prefix=''):
 

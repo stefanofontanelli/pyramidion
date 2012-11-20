@@ -8,17 +8,32 @@ from collections import namedtuple
 import math
 
 
-class ResultList(object):
+class SearchResult(object):
 
-    def __init__(self, cols=None, items=None):
+    def __init__(self, results, cols=None, paginator=None):
+        self.results = results or []
+        self.cols = cols or []
+        self.paginator = paginator or Paginator(len(self.results), 0, 25)
+
+    def rows(self):
+        for obj in self.results:
+            yield self.row(obj)
+
+    def row(self, obj):
+        for col in self.cols:
+            item = obj
+            for name in col.split('.'):
+                item = getattr(obj, name, None)
+
+            yield item
 
 
 class Paginator(object):
 
     def __init__(self, total, start, limit, factory=None):
-        self.total = total
-        self.start = start
-        self.limit = limit
+        self.total = int(total)
+        self.start = int(start)
+        self.limit = int(limit)
         self.pages = int(math.ceil(float(self.total) / self.limit))
         if factory is None:
             factory = namedtuple('Page', ['number', 'start', 'limit'])

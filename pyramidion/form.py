@@ -6,7 +6,8 @@
 
 from colanderalchemy import SQLAlchemySchemaNode
 from deform import Form
-from deform.widget import (SelectWidget,
+from deform.widget import (HiddenWidget,
+                           SelectWidget,
                            SequenceWidget)
 from deform_bootstrap.widget import (ChosenMultipleWidget,
                                      ChosenSingleWidget)
@@ -83,6 +84,8 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
         col_node = SQLAlchemySchemaNode.get_schema_from_column(self,
                                                                prop,
                                                                overrides)
+        col_node.missing = colander.null
+        col_node.default = colander.null
         name = prop.key
         title = name.title()
         column = prop.columns[0]
@@ -102,10 +105,19 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
 
         elif isinstance(column_type, (Date,
                                       DateTime,
-                                      Float,
-                                      Integer,
-                                      Numeric,
                                       Time)):
+            comparators = [('', ''),
+                           ('__lt__', '<'),
+                           ('__lte__', '<='),
+                           ('__eq__', '=='),
+                           ('__neq__', '!='),
+                           ('__gte__', '>='),
+                           ('__gt__', '>')]
+            default_comp = '__gte__'
+
+        elif isinstance(column_type, (Float,
+                                      Integer,
+                                      Numeric)):
             comparators = [('', ''),
                            ('__lt__', '<'),
                            ('__lte__', '<='),
@@ -121,7 +133,6 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
         self.comparators[name] = comparators
         validator = colander.OneOf([v[0] for v in comparators if v[0]])
         # Create right node!
-        col_node.name = 'value'
         col_node.title = col_node.name.title()
         comp_node = colander.SchemaNode(colander.String(),
                                         name='comparator',
@@ -131,19 +142,11 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
                                         validator=validator)
         mapping_name = '{}_criterion'.format(name)
         mapping_title = ''  # '{} Criterion'.format(title)
-        node = colander.SchemaNode(colander.Mapping(),
+        return colander.SchemaNode(colander.Mapping(),
                                    col_node,
                                    comp_node,
                                    name=mapping_name,
                                    title=mapping_title)
-        sequence_name = '{}_criterions'.format(name)
-        sequence_title = '{} Criterions'.format(title)
-        return colander.SchemaNode(colander.Sequence(),
-                                   node,
-                                   missing=[],
-                                   default=[],
-                                   name=sequence_name,
-                                   title=sequence_title)
 
     def get_schema_from_relationship(self, prop, overrides):
         rel_node = SQLAlchemySchemaNode.get_schema_from_relationship(self,
@@ -178,19 +181,38 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
                                         validator=validator)
         mapping_name = '{}_criterion'.format(name)
         mapping_title = '{} Criterion'.format(title)
-        node = colander.SchemaNode(colander.Mapping(),
+        return colander.SchemaNode(colander.Mapping(),
                                    rel_node,
                                    comp_node,
                                    name=mapping_name,
                                    title=mapping_title)
+
+
+class MultiCriterionSearchSchemaNode(SQLAlchemySearchSchemaNode):
+
+    def get_sequence_schema(self, prop, node):
+        name = prop.key
+        title = name.title()
         sequence_name = '{}_criterions'.format(name)
         sequence_title = '{} Criterions'.format(title)
-        return colander.SchemaNode(Sequence(),
+        return colander.SchemaNode(colander.Sequence(),
                                    node,
                                    missing=[],
                                    default=[],
                                    name=sequence_name,
                                    title=sequence_title)
+
+    def get_schema_from_column(self, prop, overrides):
+        node = SQLAlchemySearchSchemaNode.get_schema_from_column(self,
+                                                                 prop,
+                                                                 overrides)
+        return self.get_sequence_schema(prop, node)
+
+    def get_schema_from_relationship(self, prop, overrides):
+        node = SQLAlchemySearchSchemaNode.get_schema_from_relationship(self,
+                                                                       prop,
+                                                                       overrides)
+        return self.get_sequence_schema(prop, node)
 
 
 class SQLAlchemySearchForm(SQLAlchemyForm):
@@ -206,10 +228,8 @@ class SQLAlchemySearchForm(SQLAlchemyForm):
         for prop in self.inspector.attrs:
 
             name = prop.key
-            seq_name = '{}_criterions'.format(name)
             map_name = '{}_criterion'.format(name)
-            if seq_name not in schema:
-                print schema.children
+            if map_name not in schema:
                 continue
 
             try:
@@ -220,12 +240,8 @@ class SQLAlchemySearchForm(SQLAlchemyForm):
                 getattr(self.inspector.relationships, name)
                 factory = 'get_widget_from_relationship'
 
-            sequence_schema = schema[seq_name]
-            if sequence_schema.widget is None:
-                sequence_schema.widget = SequenceWidget(orderable=False)
-
-            mapping_schema = sequence_schema[map_name]
-            value_schema = mapping_schema['value']
+            mapping_schema = schema[map_name]
+            value_schema = mapping_schema[name]
             if value_schema.widget is None:
                 widget = getattr(self, factory)(prop)
                 value_schema.widget = widget
@@ -280,6 +296,73 @@ class SQLAlchemySearchForm(SQLAlchemyForm):
             widget = SelectWidget(values=values, multiple=multiple)
 
         return widget
+
+    def populate_widgets(self, session):
+
+        for prop in self.inspector.attrs:
+
+            name = prop.key
+            if name not in self.schema:
+                continue
+
+            seq_key = '{}_criterions'.format(name)
+            map_key = '{}_criterion'.format(name)
+            node_key = 'value'
+            widget = self.schema[seq_key][map_key][node_key].widget
+            try:
+                widget.populate(session)
+
+            except AttributeError:
+                continue
+
+
+class SQLAlchemySimpleSearchForm(SQLAlchemyForm):
+
+    def __init__(self, class_, includes=None, excludes=None, overrides=None, **kw):
+        self.class_ = class_
+        self.bootstrap = 'bootstrap_form_style' in kw
+        schema = SQLAlchemySearchSchemaNode(class_,
+                                            includes=includes,
+                                            excludes=excludes,
+                                            overrides=overrides)
+        self.inspector = inspect(class_)
+        for prop in self.inspector.attrs:
+
+            name = prop.key
+            map_name = '{}_criterion'.format(name)
+            if map_name not in schema:
+                continue
+
+            try:
+                getattr(self.inspector.column_attrs, name)
+                factory = 'get_widget_from_column'
+
+            except AttributeError:
+                getattr(self.inspector.relationships, name)
+                factory = 'get_widget_from_relationship'
+
+            mapping_schema = schema[map_name]
+            value_schema = mapping_schema[name]
+            if value_schema.widget is None:
+                widget = getattr(self, factory)(prop)
+                value_schema.widget = widget
+
+            comparator_schema = mapping_schema['comparator']
+            if comparator_schema.widget is None:
+                widget = self.get_comparator_widget(schema.comparators[name])
+                comparator_schema.widget = widget
+
+        # Add widgets start, limit order_by, direction, intersect.
+        schema['start'].widget = HiddenWidget()
+        schema['limit'].widget = HiddenWidget()
+        schema['order_by'].widget = HiddenWidget()
+        schema['direction'].widget = HiddenWidget()
+        schema['intersect'].widget = HiddenWidget()
+
+        super(SQLAlchemyForm, self).__init__(schema, **kw)
+
+    def get_comparator_widget(self, values, multiple=False):
+        return HiddenWidget()
 
     def populate_widgets(self, session):
 

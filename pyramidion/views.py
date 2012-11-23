@@ -4,9 +4,10 @@
 # This module is released under the MIT License
 # http://www.opensource.org/licenses/mit-license.php
 
-from .form import SQLAlchemySearchForm
+from .form import SQLAlchemySimpleSearchForm
 from .widget import (Paginator,
                      SearchResult)
+from collections import OrderedDict
 from deform import (Button,
                     ValidationFailure)
 from deformalchemy import SQLAlchemyForm
@@ -54,6 +55,7 @@ class DeformBase(object):
 
     def create(self, context, request):
         try:
+            request.response.status = 201
             response = self.get_create_response(context, request)
 
         except Exception as e:
@@ -79,15 +81,16 @@ class DeformBase(object):
 
             except IntegrityError as e:
                 log.exception('Conflict.')
-                status = 409
+                request.response.status = 409
                 response = self.get_create_409_response(context, request, e)
 
             except Exception as e:
                 log.exception('Unknown error.')
-                status = 500
+                request.response.status = 500
                 response = self.get_create_500_response(context, request, e)
 
             else:
+                request.response.status = 201
                 pks = {p.key: getattr(obj, p.key)
                        for p in self.inspector.column_attrs
                        if p.columns[0] in self.inspector.primary_key}
@@ -176,7 +179,7 @@ class DeformBase(object):
             return self.get_read_404_response(context, request, e)
 
         else:
-            form = self.get_edit_form(request, **params)
+            form = self.get_edit_form(context, request, **params)
             values = form.schema.dictify(obj)
             response = {'form': form.render(values)}
 
@@ -514,18 +517,6 @@ class DeformBase(object):
             return response
 
     def get_search_response(self, context, request):
-        """
-        params = self.get_search_params(self, context, request)
-        values = self.validate_search_params(self, request, params)
-        return {
-            'form': form,
-            'values': values,
-            'items': items,
-            'error': error,
-            'routes': self.routes,
-            'paginator': paginator
-        }
-        """
         try:
             params = self.get_search_params(request)
             values = self.validate_search_params(request, params)
@@ -534,16 +525,17 @@ class DeformBase(object):
         except ValidationFailure as e:
             log.exception('Bad request.')
             request.response.status = 400
-            response = self.get_update_400_response(context, request, e)
+            response = self.get_search_400_response(context, request, e)
 
         else:
             form = self.get_search_form(request)
-            response = {'form': form.render(values), 'result': result}
+            response = {'form': form.render(values),
+                        'result': result}
 
         return response
 
     def get_search_400_response(self, context, request, exc):
-        return {'form': None, 'error': str(exc)}
+        return {'form': exc.render(), 'error': str(exc)}
 
     def get_search_500_response(self, context, request, exc):
         return {'form': None, 'error': str(exc)}
@@ -559,16 +551,16 @@ class DeformBase(object):
 
     def get_search_form(self, request):
         route_name = self.routes['search']
+        action = request.route_url(route_name)
         btn = Button(name='submit',
                      title='Search',
                      type='submit',
                      value='submit')
-        form = SQLAlchemySearchForm(self.cls,
-                                    action=request.route_url(route_name),
-                                    method='POST',
-                                    buttons=(btn,),
-                                    formid=route_name,
-                                    bootstrap_form_style='form-inline')
+        form = SQLAlchemySimpleSearchForm(self.cls,
+                                          action=action,
+                                          buttons=(btn,),
+                                          formid=route_name,
+                                          bootstrap_form_style='form-inline')
         session = self.session or getattr(request, self.db_session_key)
         form.populate_widgets(session)
         return form
@@ -587,25 +579,29 @@ class DeformBase(object):
         criterions = []
         for prop in self.inspector.attrs:
             name = prop.key
-            attr_criterions = kwargs.pop('{}_criterions'.format(name), None)
-            if not attr_criterions:
+            attr_criterion = kwargs.pop('{}_criterion'.format(name), None)
+            if not attr_criterion:
                 continue
 
-            for c in criterions:
-                criterion = getattr(getattr(self.cls, name),
-                                    c['comparator'])(c['value'])
-                criterions.append(criterion)
+            value = attr_criterion[name]
+            if value == colander.null:
+                continue
+
+            comparator = attr_criterion['comparator']
+            print name, comparator, value
+            criterion = getattr(getattr(self.cls, name), comparator)(value)
+            criterions.append(criterion)
 
         session = self.session or getattr(request, self.db_session_key)
-        items = self.cls.search(session=session,
-                                criterions=criterions,
+        items = self.cls.search(session,
+                                *criterions,
                                 order_by=order_by,
                                 start=start,
                                 limit=limit,
                                 intersect=intersect)
         cols = self.get_search_columns()
-        total = self.cls.search(session=session,
-                                criterions=criterions,
+        total = self.cls.search(session,
+                                *criterions,
                                 raw_query=True).count()
         paginator = Paginator(total=total, start=start, limit=limit)
         return SearchResult(results=items,
@@ -613,8 +609,11 @@ class DeformBase(object):
                             paginator=paginator)
 
     def get_search_columns(self):
-        return [p.key for p in self.inspector.attrs]
+        col = OrderedDict()
+        for p in self.inspector.attrs:
+            col[p.key] = p.key
 
+        return col
 
     def setup_routing(self, config, prefix=''):
 

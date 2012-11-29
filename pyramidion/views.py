@@ -44,8 +44,8 @@ class DeformBase(object):
             raise e
             response = self.get_new_500_response(context, request, e)
 
-        finally:
-            return response
+        response['routes'] = self.routes
+        return response
 
     def get_new_response(self, context, request):
         return {'form': self.get_create_form(context, request).render()}
@@ -63,6 +63,7 @@ class DeformBase(object):
             request.response.status = 500
             response = self.get_create_500_response(context, request, e)
 
+        response['routes'] = self.routes
         return response
 
     def get_create_response(self, context, request):
@@ -160,8 +161,8 @@ class DeformBase(object):
             request.response.status = 500
             response = self.get_read_500_response(context, request, e)
 
-        finally:
-            return response
+        response['routes'] = self.routes
+        return response
 
     def get_read_response(self, context, request):
         try:
@@ -210,8 +211,8 @@ class DeformBase(object):
             request.response.status = 500
             response = self.get_edit_500_response(context, request, e)
 
-        finally:
-            return response
+        response['routes'] = self.routes
+        return response
 
     def get_edit_response(self, context, request):
         params = self.get_edit_params(context, request)
@@ -277,8 +278,8 @@ class DeformBase(object):
             request.response.status = 500
             response = self.get_update_500_response(context, request, e)
 
-        finally:
-            return response
+        response['routes'] = self.routes
+        return response
 
     def get_update_response(self, context, request):
         pks, values = self.get_update_params(context, request)
@@ -356,30 +357,6 @@ class DeformBase(object):
 
     def remove(self, context, request):
         try:
-            params = request.matchdict
-            obj = self.read_obj(request, **params)
-            form = self.get_remove_form(request, **params)
-            values = form.schema.dictify(obj)
-
-        except NoResultFound as e:
-            log.exception('No result found.')
-            status = 404
-            form = ''
-
-        except Exception:
-            log.exception('Unknown error.')
-            status = 500
-            form = ''
-
-        else:
-            status = 200
-            form = form.render(values)
-
-        request.response.status = status
-        return {'status': status, 'form': form}
-
-    def remove(self, context, request):
-        try:
             response = self.get_remove_response(context, request)
 
         except Exception as e:
@@ -387,8 +364,8 @@ class DeformBase(object):
             request.response.status = 500
             response = self.get_remove_500_response(context, request, e)
 
-        finally:
-            return response
+        response['routes'] = self.routes
+        return response
 
     def get_remove_response(self, context, request):
         try:
@@ -437,8 +414,8 @@ class DeformBase(object):
             request.response.status = 500
             response = self.get_delete_500_response(context, request, e)
 
-        finally:
-            return response
+        response['routes'] = self.routes
+        return response
 
     def get_delete_response(self, context, request):
         try:
@@ -513,8 +490,8 @@ class DeformBase(object):
             request.response.status = 500
             response = self.get_search_500_response(context, request, e)
 
-        finally:
-            return response
+        response['routes'] = self.routes
+        return response
 
     def get_search_response(self, context, request):
         try:
@@ -588,7 +565,6 @@ class DeformBase(object):
                 continue
 
             comparator = attr_criterion['comparator']
-            print name, comparator, value
             criterion = getattr(getattr(self.cls, name), comparator)(value)
             criterions.append(criterion)
 
@@ -616,20 +592,49 @@ class DeformBase(object):
         return col
 
     def setup_routing(self, config, prefix=''):
-
         for action in self.routes:
-            resource = self.cls.__name__.lower()
+            getattr(self, 'setup_{}_routing'.format(action))(config, prefix)
+
+    def setup_default_routing(self, action, config, prefix='', path=''):
+        route_name = self.routes[action]
+        resource = self.cls.__name__.lower()
+        if not path:
             path = '{}/{}/{}'.format(prefix, resource, action)
-            if action in ('read', 'edit', 'update', 'remove', 'delete'):
-                pks = ['{' + p.key + '}'
+        tpl = '/{}.mako'.format(action)
+        config.add_route(route_name, path)
+        config.add_view(getattr(self, action),
+                        route_name=route_name,
+                        renderer=tpl,
+                        permission=action)
+
+    def setup_default_item_routing(self, action, config, prefix=''):
+        resource = self.cls.__name__.lower()
+        pks = ['{' + p.key + '}'
                        for p in self.inspector.column_attrs
                        if p.columns[0] in self.inspector.primary_key]
-                path = '{}/{}'.format(path, '/'.join(pks))
+        path = '{}/{}/{}/{}'.format(prefix, resource, action, '/'.join(pks))
+        self.setup_default_routing(action, config, prefix, path)
 
-            config.add_route(self.routes[action], path)
+    def setup_new_routing(self, config, prefix=''):
+        self.setup_default_routing('new', config, prefix)
 
-            tpl = '/{}.mako'.format(action)
-            config.add_view(getattr(self, action),
-                            route_name=self.routes[action],
-                            renderer=tpl,
-                            permission=action)
+    def setup_create_routing(self, config, prefix=''):
+        self.setup_default_routing('create', config, prefix)
+
+    def setup_search_routing(self, config, prefix=''):
+        self.setup_default_routing('search', config, prefix)
+
+    def setup_read_routing(self, config, prefix=''):
+        self.setup_default_item_routing('read', config, prefix)
+
+    def setup_edit_routing(self, config, prefix=''):
+        self.setup_default_item_routing('edit', config, prefix)
+
+    def setup_update_routing(self, config, prefix=''):
+        self.setup_default_item_routing('update', config, prefix)
+
+    def setup_remove_routing(self, config, prefix=''):
+        self.setup_default_item_routing('remove', config, prefix)
+
+    def setup_delete_routing(self, config, prefix=''):
+        self.setup_default_item_routing('delete', config, prefix)

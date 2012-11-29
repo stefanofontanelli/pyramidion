@@ -359,6 +359,7 @@ class SQLAlchemySimpleSearchForm(SQLAlchemyForm):
         schema['direction'].widget = HiddenWidget()
         schema['intersect'].widget = HiddenWidget()
 
+        # It is needed parent of __SQLAlchemyForm__ !!!
         super(SQLAlchemyForm, self).__init__(schema, **kw)
 
     def get_comparator_widget(self, values, multiple=False):
@@ -372,10 +373,8 @@ class SQLAlchemySimpleSearchForm(SQLAlchemyForm):
             if name not in self.schema:
                 continue
 
-            seq_key = '{}_criterions'.format(name)
             map_key = '{}_criterion'.format(name)
-            node_key = 'value'
-            widget = self.schema[seq_key][map_key][node_key].widget
+            widget = self.schema[map_key][name].widget
             try:
                 widget.populate(session)
 

@@ -12,7 +12,7 @@ class SearchResult(object):
 
     def __init__(self, results, cols=None, paginator=None):
         self.results = results or []
-        self.cols = cols or []
+        self.cols = cols or {}
         self.paginator = paginator or Paginator(len(self.results), 0, 25)
 
     def rows(self):

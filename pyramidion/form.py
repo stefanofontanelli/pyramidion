@@ -52,7 +52,7 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
                                     missing=25,
                                     default=25,
                                     validator=colander.Range(min=1))
-        values = [prop.key for prop in self.inspector.attrs]
+        values = [prop.key for prop in self.inspector.column_attrs]
         order_by = colander.SchemaNode(colander.String(),
                                        name='order_by',
                                        title='Order By',
@@ -152,6 +152,9 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
         rel_node = SQLAlchemySchemaNode.get_schema_from_relationship(self,
                                                                      prop,
                                                                      overrides)
+        if rel_node == None:
+          return None
+
         name = prop.key
         title = name.title()
         if prop.uselist:

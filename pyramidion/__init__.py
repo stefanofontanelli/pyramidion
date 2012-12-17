@@ -7,5 +7,7 @@
 
 from .views import DeformBase
 from .utils import setup_routing
+from .widget import (Paginator,
+                     SearchResult)
 
 __all__ = ['DeformBase', 'setup_routing']

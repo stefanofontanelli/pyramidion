@@ -182,7 +182,7 @@ class DeformBase(object):
         else:
             form = self.get_edit_form(context, request, **params)
             values = form.schema.dictify(obj)
-            response = {'form': form.render(values)}
+            response = {'form': form.render(values), 'values': values, 'obj': obj}
 
         return response
 
@@ -521,6 +521,9 @@ class DeformBase(object):
         return request.params.items()
 
     def validate_search_params(self, request, params):
+        if not params:
+            return {}
+
         form = self.get_search_form(request)
         return {name: value
                 for name, value in form.validate(params).items()

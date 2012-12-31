@@ -321,7 +321,9 @@ class DeformBase(object):
         pks = request.matchdict
         params = request.POST.items()
         form = self.get_update_form(request, **pks)
-        values = form.validate(params)
+        values = {key: value
+                  for key, value in form.validate(params).iteritems()
+                  if value != colander.null}
         return pks, values
 
     def get_update_form(self, request, **pks):

@@ -11,7 +11,7 @@ from collections import OrderedDict
 from deform import (Button,
                     ValidationFailure)
 from deformalchemy import SQLAlchemyForm
-from pyramid.httpexceptions import HTTPFound
+from pyramid.httpexceptions import HTTPFound, HTTPForbidden
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError 
 from sqlalchemy.orm.exc import NoResultFound
@@ -206,6 +206,9 @@ class DeformBase(object):
         try:
             response = self.get_edit_response(context, request)
 
+        except HTTPForbidden as e:
+            raise e
+
         except Exception as e:
             log.exception('Unknown error.')
             request.response.status = 500
@@ -272,6 +275,9 @@ class DeformBase(object):
     def update(self, context, request):
         try:
             response = self.get_update_response(context, request)
+
+        except HTTPForbidden as e:
+            raise e
 
         except Exception as e:
             log.exception('Unknown error.')
@@ -346,6 +352,7 @@ class DeformBase(object):
         session = self.session or getattr(request, self.db_session_key)
         try:
             obj = self.cls.update(session, pks, **values)
+            session.flush()
 
         except Exception as e:
             log.exception('Error during update')

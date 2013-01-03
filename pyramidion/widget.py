@@ -23,7 +23,7 @@ class SearchResult(object):
         for col in self.cols:
             item = obj
             for name in col.split('.'):
-                item = getattr(obj, name, None)
+                item = getattr(item, name, None)
 
             yield item
 

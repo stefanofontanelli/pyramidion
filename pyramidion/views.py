@@ -96,7 +96,7 @@ class DeformBase(object):
                        for p in self.inspector.column_attrs
                        if p.columns[0] in self.inspector.primary_key}
                 form = self.get_edit_form(context, request, **pks)
-                response = {'form': form.render(params)}
+                response = {'form': form.render(params), 'params': params}
 
         return response
 

@@ -87,7 +87,6 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
         col_node.missing = colander.null
         col_node.default = colander.null
         name = prop.key
-        title = name.title()
         column = prop.columns[0]
         column_type = getattr(column.type, 'impl', column.type)
         type_ = colander.String()
@@ -133,7 +132,7 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
         self.comparators[name] = comparators
         validator = colander.OneOf([v[0] for v in comparators if v[0]])
         # Create right node!
-        col_node.title = col_node.name.title()
+        col_node.title = col_node.title.title()
         comp_node = colander.SchemaNode(colander.String(),
                                         name='comparator',
                                         title='Comparator',
@@ -156,7 +155,6 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
           return None
 
         name = prop.key
-        title = name.title()
         if prop.uselist:
             comparators = [('', ''),
                            ('contains', 'contains'),
@@ -175,7 +173,7 @@ class SQLAlchemySearchSchemaNode(SQLAlchemySchemaNode):
         validator = colander.OneOf([v[0] for v in comparators if v[0]])
         # Create the right node!
         rel_node.name = 'value'
-        rel_node.title = rel_node.name.title()
+        rel_node.title = rel_node.title.title()
         comp_node = colander.SchemaNode(colander.String(),
                                         name='comparator',
                                         title='Comparator',

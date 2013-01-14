@@ -303,9 +303,6 @@ class SQLAlchemySearchForm(SQLAlchemyForm):
         for prop in self.inspector.attrs:
 
             name = prop.key
-            if name not in self.schema:
-                continue
-
             seq_key = '{}_criterions'.format(name)
             map_key = '{}_criterion'.format(name)
             node_key = 'value'
@@ -372,13 +369,8 @@ class SQLAlchemySimpleSearchForm(SQLAlchemyForm):
 
             name = prop.key
             map_key = '{}_criterion'.format(name)
-            schema = self.schema[map_key]
-            if name not in schema:
-                continue
-
-            widget = schema[name].widget
             try:
-                widget.populate(session)
+                self.schema[map_key][name].widget.populate(session)
 
-            except AttributeError:
+            except (KeyError, AttributeError) as e:
                 continue

@@ -371,11 +371,12 @@ class SQLAlchemySimpleSearchForm(SQLAlchemyForm):
         for prop in self.inspector.attrs:
 
             name = prop.key
-            if name not in self.schema:
+            map_key = '{}_criterion'.format(name)
+            schema = self.schema[map_key]
+            if name not in schema:
                 continue
 
-            map_key = '{}_criterion'.format(name)
-            widget = self.schema[map_key][name].widget
+            widget = schema[name].widget
             try:
                 widget.populate(session)
 
